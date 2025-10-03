@@ -20,22 +20,18 @@ List of problems:
 1. Initialization and parsing of quotes - resolve as data vase access is present
 2. Do termination dates for each maturity coincide across every type of contract traded (СПФИ)? 
     2.1. If yes: create separate variable for the collection of tenors and termination dates
-3. class Quote requires rework. 
-4. Numpy and datetime 
-5. Quote logic 
-7. Solver for curve. How to make it fast
+3. Quote logic (its absence)
+4. Solver for curve. How to make it fast
+5. Calendar class added Market state class is kinda fuzzy ngl fr fr 
+6. MB we should make da MEGAINSTANCE for the 4 instances of Calendar (??) 
 '''
 
 '''
 To-do list: 
-1. Dates functions and numpying 
-2. Prepare all the calendars
-3. Interpolation
-4. curve() into Swap integration
-5. discounting function 
-6. docstrings
-7. Solver for curve. How to make it fast
-8. Consider addition of Calendar class into Market state class
+1. Interpolation
+2. curve() into Swap integration
+3. docstrings (SWAPS)
+4. Solver for curve. How to make it fast
 '''
 
 class Solver: 

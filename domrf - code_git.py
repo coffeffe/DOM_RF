@@ -11,24 +11,27 @@ from dateutil.relativedelta import relativedelta
 import jax.numpy as jnp
 import jax 
 import matplotlib.pyplot as plt 
+import pickle
 
 #to see unfinished code type in "IN WORK"
 
 '''
 List of problems: 
-1. Initialization and parsing of quotes
+1. Initialization and parsing of quotes - resolve as data vase access is present
 2. Do termination dates for each maturity coincide across every type of contract traded (СПФИ)? 
     2.1. If yes: create separate variable for the collection of tenors and termination dates
-3. class Quote requires rework. 
-4. Numpy and datetime 
-5. Quote logic 
+3. Quote logic (its absence)
+4. Solver for curve. How to make it fast
+5. Calendar class added Market state class is kinda fuzzy ngl fr fr 
+6. MB we should make da MEGAINSTANCE for the 4 instances of Calendar (??) 
 '''
 
 '''
 To-do list: 
-1. Termination date function
-2. Dates functions and numpying 
-3. Prepare all the calendars
+1. Interpolation
+2. curve() into Swap integration
+3. docstrings (SWAPS)
+4. Solver for curve. How to make it fast
 '''
 
 class Solver: 
@@ -55,6 +58,7 @@ class Testing:
 
     Public methods: 
         timer(): Decorator function for timing function calling.
+        termination_dates_datetime(): Returns datetime.date format list of the termination dates as at 19.09.2025
     '''
     termination_dates_dict = {
         '1W': '2025-09-26',
@@ -111,39 +115,9 @@ class Testing:
 
         return termination_dates
 
-@dataclass
-class Market: 
-    '''
-    Stores current market parameters used at a wide range of calculations.
-
-    Public methods: 
-        update(): updates market paramaters in accordance with the current state. (IN WORK)
-
-    Parameters: 
-         today (datetime.date): current date 
-         key_rate_0 (float): current CB key rate 
-         rub_cny_spot (float): rub/cny spot rate at the current date
-    '''
-    today_: date
-    key_rate_0: float
-    rub_cny_spot: float
-    termination_dates: jax.Array
-
-    def update(self): 
-        '''
-        Updates market paramaters in accordance with the current state. (IN WORK)
-
-        !!!Requires addition of parsing values for rub/sny spot rate and key rate. 
-        '''
-
-        self.today_ = date.today()
-        #self.ley_rate_0 = 
-        #self.rub_cny_spot = 
-        #figure out a way to parse the values from a source trusted by domrf firewall
-
 class Dates: 
     '''
-    Operations with dates (IN WORK)
+    Basic operation with dates (IN WORK)
 
     Parameters: 
         today_ (datetime.date): stores the starting date for the continuum
@@ -362,8 +336,7 @@ class Dates:
         
         Args: 
             dates (Datetimes): dates to be converted
-            cconventiononvension: 0 or "FOLLOWING" - following convention ensures the date is moved to the closest working day
-                        1 or "MODFOLLOWING" -  following convention ensures the date is moved to the closest working day within a month
+            convention: 0 or "FOLLOWING" - following convention ensures the date is moved to the closest working day \n 1 or "MODFOLLOWING" -  following convention ensures the date is moved to the closest working day within a month
 
         Returns: 
             Dates in accordance with conventions
@@ -408,7 +381,7 @@ class Dates:
     
     Args: 
         dates (List[date]): list of datetime.date objects to be converted
-        convention: 0 or "FOLLOWING" - following convention ensures the date is moved to the closest working day
+        convention: 0 or "FOLLOWING" - following convention ensures the date is moved to the closest working day 
                     1 or "MODFOLLOWING" - modified following convention ensures the date is moved to the closest 
                                           working day within a month
     
@@ -466,7 +439,7 @@ class Dates:
 
     @staticmethod
     def terminations_dates_dict(start_date: date):
-        '''Returns dictionary of the terminaton dates for the standard maturities'''
+        '''Returns dictionary of the terminaton dates for the standard maturities based on the start date.'''
         termination_m = ['1W', '2W', '1M', '2M', '3M', '6M', '9M', '1Y', 
                         '2Y', '3Y', '4Y', '5Y', '6Y', '7Y', '8Y', '9Y', '10Y']
 
@@ -488,26 +461,52 @@ class Dates:
         return termination_dates_dict
 
 class Calendar: 
-    '''Class is designed to store calendar. Contains calendar for following and modfollowing dates. (IN WORK)
+    '''Class is designed to store calendars and methods manipulating these calendars. (IN WORK)
     
-    !!! PROTOTYPE
-    '''
-    today_ = datetime.today()
+    !!! Consider merging with Dates class 
 
-    def __init__(self, start_date):
+    Parameters: 
+        today_ (date): default parameter. Literally the current day (today)
+        start_date (date): parameter shifting the day zero for the simulation/pricing. Substitutes a value of today_. 
+
+    Public methods: 
+        calendars(): Generates 4 intances: dates in datetime.date, dates as integer, 
+                     fraction of year for each incremental day and cummulative fractoin of year
+        projection_of_dates_as_integer(): projects and array of datetime.date variables into jax.Array in accordance with the calendar of integer form.
+        gorinich(): consider deliting the function for its obsolesence 
+        save_calendars(): pickles the calendars generated by calendars() function for later use
+        get_calendars(): loads the pickled before calendars. Shifts the day-zero in the calendars if needed. (IN WORK)
+        payment_dates(): bbtain the payment dates from termination dates in accrodance with the business day offset by 1D and FOLLOWING convention
+    '''
+    today_ = datetime.today().date()
+
+    def __init__(self, **kwargs):
         '''(!!!)'''
-        if start_date is None: 
-            start_date = Calendar.today_
+        start_date = kwargs.get('start_date', Calendar.today_)
         pass
     
     @Testing.timer
     @staticmethod
-    def calendars(start_date, **kwargs):
+    def calendars(start_date=None, **kwargs):
+        '''Generates 4 intances: dates in datetime.date, dates as integer, fraction of year for each incremental day and cummulative fractoin of year
+        
+        Args:
+            start_date (datetime.date): day zero for the calendar instances
+            **kwords: additional parameters
+
+        Keyword Args: 
+            span_months (int): desired length of the calendars in month. Default is 122 months 
+
+        Returns:
+            dates (list[dates]): calendar of list type where each element is of datetime.date format 
+            dates_np_int (jax.Array): calendar of jax array format, each day is integer starting with 0 and incrementing by 1
+            fy (jax.Array): fraction of year for each day_{t} - day_{t-1} interval 
+            fy_cum (jax.Array): cummulative fraction of year array
+        '''
         if start_date is None: 
             start_date = Calendar.today_
         span_months = kwargs.get('span_months', 122)
 
-        '''requires pickling'''
         dates = Dates.custom_space(start_date, span_months) 
         dates_np = np.array(dates, dtype='datetime64[D]')
         _ = jnp.array(dates_np, dtype='int32')
@@ -516,7 +515,7 @@ class Calendar:
 
         fy = [0]*len(dates)
         
-        #fraction of year in jbp format 
+        #fraction of year in jnp format 
         for y in range(1, len(dates)): 
             fy[y] = Dates.frac_year(dates[y-1], dates[y], 1)
         fy = jnp.array(fy, dtype='float32')
@@ -526,6 +525,23 @@ class Calendar:
     
     @Testing.timer
     def projection_of_dates_as_integer(projected_dates, dates, dates_np_int):
+        '''Projects and array of datetime.date variables into jax.Array in accordance with the calendar of integer form. 
+        
+        Args: 
+            projected_dates (list[date]): list of dates to be projected into integer
+            dates (list[date]): calendar in space of which the dates are projected
+            dates_np_int (jax.Array): calendar in space of which the dates are projected in integer representation
+            
+        Returns: 
+            jax.Array of integer values of projected original dates
+            
+        Example: 
+            >>>x = projection_of_dates_as_integer(date(2025, 1, 2), 
+                                                 [date(2025, 1, 1), date(2025, 1, 2), date(2025, 1, 3)],
+                                                  jnp.Array(0, 1 ,2))
+            >>>x
+            Array(2, dtype='int8')
+        '''
         _ = []
         for date in projected_dates: 
             if date in dates:
@@ -537,22 +553,250 @@ class Calendar:
 
     @staticmethod
     def gorinich(calendar): 
+        '''
+        !!! PROTOTYPE. CONSIDER DELETE'''
         calendar_np = np.array(calendar, dtype='datetime64[D]')
         _ = jnp.array(dates_np, dtype='int')
         calendar_int = _ - (_[0] - 1) 
-        return calendar, calendar_np, calendar_int
+        return calendar, calendar_np, calendar_int 
+
+    @staticmethod
+    def save_calendars(**kwargs): 
+        ''' Pickles the calendars generated by calendars() function for later use. 
+
+        Args: 
+            **kwords: the 4 calendar instances or none
+
+        Keyword Args: 
+            dates (list[dates]): calendar of list type where each element is of datetime.date format 
+            dates_np_int (jax.Array): calendar of jax array format, each day is integer starting with 0 and incrementing by 1
+            fy (jax.Array): fraction of year for each day_{t} - day_{t-1} interval 
+            fy_cum (jax.Array): cummulative fraction of year array
+
+        Returns: 
+            None
+        '''
+        dates = kwargs.get('dates', None)
+        dates = kwargs.get('dates', None)
+        dates_np_int = kwargs.get('dates_np_int', None)
+        fraction_of_year = kwargs.get('fraction_of_year', None)
+        fraction_of_year = kwargs.get('fy', None)
+        fraction_of_year_cum = kwargs.get('fraction_of_year_cum', None)
+        fraction_of_year_cum = kwargs.get('fy_cum', None)
+
+        _ = {'dates': dates, 'dates_np_int': dates_np_int, 'fraction_of_year': fraction_of_year, 
+             'fraction_of_year_cum': fraction_of_year_cum}
+        
+        for name, array in _.items(): 
+            if array is not None: 
+                picklename = f'{name}.pkl'
+                with open(picklename, 'wb') as f: 
+                    pickle.dump(array, f)  
+
+        return None 
+
+    @Testing.timer
+    @staticmethod
+    def get_calendars(**kwargs):
+        '''Loads the pickled before calendars. Shifts the day-zero in the calendars if needed. (IN WORK)
+
+        !!! Add ability to handle type(int)
+
+        Keyword Args: 
+            start_date (datetime.date): Allows to shift the day-zero of calendars to the desired one. 
+
+        Returns: 
+            None or 
+            dates (list[dates]): calendar of list type where each element is of datetime.date format 
+            dates_np_int (jax.Array): calendar of jax array format, each day is integer starting with 0 and incrementing by 1
+            fy (jax.Array): fraction of year for each day_{t} - day_{t-1} interval 
+            fy_cum (jax.Array): cummulative fraction of year array            
+        '''
+        #load pickles back into the system
+        start_date = kwargs.get('start_date', Calendar.today_)
+
+        loaded_objects = []
+        for filename in ['dates.pkl', 'dates_np_int.pkl', 'fraction_of_year.pkl', 'fraction_of_year_cum.pkl']: 
+            if os.path.isfile(filename): 
+                with open(filename, 'rb') as f: 
+                    array = pickle.load(f)
+                    loaded_objects.append(array)
+            else: return "No calendar files in the directory"
+
+        _dates, _dates_np_int, _fraction_of_year, _fraction_of_year_cum = loaded_objects
+
+        if isinstance(start_date, date): 
+
+            #check if the start date is in the calendar
+            if start_date < _dates[0]: 
+                print(start_date)
+                raise ValueError('Unavailable start_date parameter')
+            
+            if start_date == _dates[0]: 
+                print('start date coincides with the initial date in the calendar')
+                return _dates, _dates_np_int, _fraction_of_year, _fraction_of_year_cum #TODO
+            
+            print('start date is greater then the initial date in the calendar')
+            delta = (start_date - _dates[0]).days
+            
+            dates = _dates[delta:]
+            dates_np_int = _dates_np_int[delta:] - delta
+            _fraction_of_year = _fraction_of_year[delta:]
+            fraction_of_year = _fraction_of_year.at[0].set(0.0)
+            _fraction_of_year_cum = _fraction_of_year_cum[delta:]
+            fraction_of_year_cum = _fraction_of_year_cum.at[0].set(0.0)
+
+            return dates, dates_np_int, fraction_of_year, fraction_of_year_cum
+        
+        if isinstance(start_date, int): #TODO
+            pass
+
+        return None
+    
+    @staticmethod
+    def payment_dates(termination_dates: Union[list, jax.Array], **kwargs): 
+        '''Obtain the payment_dates in accrodance with the business day offset by 1D and FOLLOWING convention 
+        as declared in the standard swap contracts. That includes IRS, OIS, XCCY. Handles both list of dates and jnp.array
+        
+        Args:
+            termination_dates (): termination dates of the swaps (assumed to be the same for every swap: irs, ois, XXCY)
+            start_date (date): optional arguments. It is used in cases if termination_dates are inputed in integer format
+            
+        Returns: 
+            payments dates corresponding to each termination dates'''
+        if isinstance(termination_dates, jax.Array): 
+            start_date = kwargs.get('start_date', None)
+            if start_date is None: 
+                raise ValueError('Can not determine the payment dates as there is no regerence starting date')
+
+            _ = []
+            for date_jax in termination_dates: 
+                date_ = int(date_jax)
+                _2 = start_date + timedelta(days=date_) + timedelta(days=1)
+                _.append(_2)
+            
+            payment_dates = Dates.business_day(_, 0)
+            return payment_dates
+
+        return None
+
+        
+@dataclass
+class Market: 
+    '''
+    Stores current market parameters used at a wide range of calculations. (IN WORK)
+
+    Public methods: 
+        update(): updates market paramaters in accordance with the current state. (IN WORK)
+
+    Parameters: 
+         today_ (datetime.date): current date (the literal today or the desired one)
+         key_rate (float): current CB key rate 
+         rub_cny_spot (float): rub/cny spot rate at the current date
+         termination_dates (list[dates] or jax.Array): termination dates outstanding for the swaps (should be complient with today_)
+    Calendar parameters: 
+        dates (list[dates]): calendar of list type where each element is of datetime.date format 
+        dates_np_int (jax.Array): calendar of jax array format, each day is integer starting with 0 and incrementing by 1
+        fy (jax.Array): fraction of year for each day_{t} - day_{t-1} interval 
+        fy_cum (jax.Array): cummulative fraction of year array          
+    '''
+    def __init__(self, key_rate: float, rub_cny_spot: float, **kwargs):
+        self.today_: date = kwargs.get('today', Calendar.today_)
+        self.today_: date = kwargs.get('today_date', Calendar.today_)
+        self.today_: date = kwargs.get('start_date', Calendar.today_)
+        self.key_rate = key_rate 
+        self.rub_cny_spot = rub_cny_spot
+        self.termination_dates = kwargs.get('termination_dates', None)
+
+        self.dates, self.dates_np_int, self.fraction_of_year, self.fraction_of_year_cum = Calendar.get_calendars(start_date=self.today_)
+
+    def update(self): 
+        '''
+        Updates market paramaters in accordance with the current state. (IN WORK)
+
+        !!!Requires addition of parsing values for rub/sny spot rate and key rate. 
+        '''
+
+        self.today_ = date.today()
+        #self.ley_rate_0 = 
+        #self.rub_cny_spot = 
+        #figure out a way to parse the values from a source trusted by domrf firewall
 
 class Quote: 
     pass
 
 @Testing.timer
+def discounting_series(float_rate_series): 
+    '''Generates series of discounting factor. The functoin is coupled with floating_rate_series. 
+    Every discount factor corresponds to fraction of year value, hence it correspongs to calendar (dates).
+    
+    Args: 
+        float_rate_series (jax.Array): product of float_rate_series()
+        
+    Returns: series of discounting factors
+    '''
+    _float_rate_serioes_wo_first = float_rate_series[1:] #to ensure nothing is devided by zero as it is the first element 
+    _ = _float_rate_serioes_wo_first.cumprod()
+    _ = 1 / _
+    discounting_series = jnp.insert(_, 0, 1.0)
+    return discounting_series
+
+@Testing.timer
+def discount_factor(curve, fraction_of_year_dates, zero_date, date_):
+    '''Get discount factor for specific date. (IN WORK)
+    
+    !!! Assess the need for such function. discounting_series() takes 0.15s on average 
+    '''
+    df = 0
+
+    if isinstance(date_, date): 
+        date_int = (date_ - zero_date).days()
+    if isinstance(date_, int): 
+        _ = date_
+        date_ = zero_date + timedelta(days=date_)
+        date_int = _ 
+
+    if date_int == 0: 
+        df = 1 
+        return df
+    
+    float_rate_at_date = curve[date_int-1]*fraction_of_year_dates[date_int]
+
+@Testing.timer
+def float_rate_series(curve, fraction_of_year_dates): 
+    '''Generates the flaoting rate in accordance with funding curve and current calendar (Calendar.dates)
+    
+    Args:
+        curve (jax.Array): values corresponding to the funding rate at a particular date
+        fraction_of_year_dates (jax.Array): fraction of year corresponding to day_{t}-day{t-1} interval
+
+    Returns: floating rate series for the calendar
+    '''
+    _fraction_of_year_dates_wo_first = fraction_of_year_dates[1:]
+    _curve_wo_last = curve[:-1]
+
+    _ = jnp.multiply(_fraction_of_year_dates_wo_first, _curve_wo_last)
+    _ = _ + 1
+    float_rate_series = jnp.insert(_, 0, 0)
+
+    return float_rate_series
+
+@Testing.timer
 def curve(pivot_points: Union[list[date], jax.Array], values: Union[list, jax.Array], calendar_length): 
-    '''(IN WORK)'''
+    '''Generates the rate curve in accordance with the outstanding calendar. (IN WORK)
+    
+    Args: 
+        pivot_points: the date for which the change of interest rate is assumed
+        values: assumed values of the rate at the pivot points 
+        calendar_length: the length of the calendar period desired
+        
+    Returns:
+        Rate curve (non-interpolated) for the period desired'''
     if len(pivot_points) != len(values): 
         raise ValueError('There should be as much pivot dates as much values') 
     
     try: 
-        _values = jnp.array(values, dtype='float64') 
+        _values = jnp.array(values, dtype='float32') 
     except: raise ValueError
 
     if isinstance(pivot_points, list): 
@@ -570,7 +814,10 @@ def curve(pivot_points: Union[list[date], jax.Array], values: Union[list, jax.Ar
         _[previous:date] = [values[y]]*len(_[previous:date])
         previous = date
 
-    result = jnp.array(_, dtype='float64') 
+    #ensuring if the tail of the curve is non-zero: 
+    _[previous:] = [_[previous-1]]*len(_[previous:])
+
+    result = jnp.array(_, dtype='float32') 
     return result 
 
 class Swap: 
@@ -587,12 +834,18 @@ class Swap:
         start_date = kwargs.get('start_date', 0)
 
         if isinstance(start_date, date): 
-            self.start_date = start_date - Swap.market_state.today_ #ensuring both start and end date are of int (in index sense) format
-        else: self.start_date = start_date
+            self.start_date = (start_date - Swap.market_state.today_).days() #ensuring both start and end date are of int (in index sense) format
+            self.start_date_datetime = start_date
+        else: 
+            self.start_date = start_date
+            self.start_date_datetime = Swap.market_state.dates[self.start_date]
 
         if isinstance(end_date, date): 
-            self.end_date = end_date - Swap.market_state.today_
-        else: self.end_date = end_date
+            self.end_date = (end_date - Swap.market_state.today_).days()
+            self.end_date_datetime = end_date
+        else: 
+            self.end_date = end_date
+            self.end_date_datetime = Swap.market_state.dates[self.end_date]
 
         #allows overriding market state 
         self.market_state = kwargs.get('market_state', Swap.market_state) #update market_state internally if needed
@@ -608,25 +861,64 @@ class OIS(Swap):
         super().__init__(end_date, **kwargs)
         self.fixed_rate = fix_rate
 
+    def _payment_dates(self): 
+        '''Consider moving the function into Calerndar class. OBSOLETE
+        
+        !!! consider deleting that function as it doubles the Calendar.payment_dates()
+        '''
+        if self.end_date - 366 <= self.start_date: 
+            payment_dates = Calendar 
+        
+        
+
+        return None
+
+    def cost(self): 
+        pass
+
+    
+
 
 if __name__ == '__main__':
 
-    dates, dates_np_int, fy, fy_cum = Calendar.calendars(date(2025, 9, 19))
-    calendar_length = len(dates_np_int)
+    # dates, dates_np_int, fy, fy_cum = Calendar.get_calendars(start_date=date(2025,9,19))
+    # calendar_length = len(dates_np_int)
 
     termination_dates = Testing.termination_dates_datetime()
 
-    term_dates = Calendar.projection_of_dates_as_integer(termination_dates, dates, dates_np_int)
+    ms = Market(start_date=date(2025, 9 ,19), key_rate=0.17, rub_cny_spot=11.2)
+    Swap.market_state = ms
+
+    term_dates = Calendar.projection_of_dates_as_integer(termination_dates, ms.dates, ms.dates_np_int)
+
+    ms.termination_dates = term_dates
 
     ruonia_implied = Testing.ois_ruonia_mid #just imagine
 
-    ois_ruonia = curve(term_dates, ruonia_implied, calendar_length)
-    print(ois_ruonia)
+    calendar_length = len(ms.dates)
+    ois_ruonia = curve(ms.termination_dates, ruonia_implied, calendar_length)
 
-    plt.plot(ois_ruonia)
-    plt.show()
+    # plt.plot(ois_ruonia)
+    # plt.show()
+
+    fr = float_rate_series(ois_ruonia, ms.fraction_of_year)
+
+    df = discounting_series(fr)
+
+    print(ms.fraction_of_year_cum)
+    print(ms.fraction_of_year)
+
+    payment_date_check = Calendar.payment_dates(termination_dates=term_dates, start_date=date(2025,9,19))
+    print(payment_date_check) #works just as intended!!!!!!!!!11
+
+    # ois_1w = OIS(end_date=ms.termination_dates[0], fix_rate=0.16)
+    # print(ois_1w._payment_dates())
+
+
     
-    ms = Market(date(2025, 9 ,19), 0.17, 11.2, term_dates)
+
+
+
 
 
 
