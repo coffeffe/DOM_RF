@@ -694,6 +694,7 @@ class Market:
          key_rate (float): current CB key rate 
          rub_cny_spot (float): rub/cny spot rate at the current date
          termination_dates (list[dates] or jax.Array): termination dates outstanding for the swaps (should be complient with today_)
+         
     Calendar parameters: 
         dates (list[dates]): calendar of list type where each element is of datetime.date format 
         dates_np_int (jax.Array): calendar of jax array format, each day is integer starting with 0 and incrementing by 1
@@ -821,13 +822,23 @@ def curve(pivot_points: Union[list[date], jax.Array], values: Union[list, jax.Ar
     return result 
 
 class Swap: 
-    '''(IN WORK)'''
+    ''' Describes the main parameters of a swap contract.
+
+    Attributes: 
+       default_notional_value (float): Assumed value of the notional for contract cost calculation (Arbitrary UM) 
+       market_state (Market): Market parameters to price according to 
+    (IN WORK)'''
     default_notional_value = 100 
     market_state = None
 
     def __init__(self, end_date: Union[int, date], **kwargs): 
         '''(IN WORK)
-        start_date is by default 0 
+        
+        Args: 
+            notional (float): assumes Swap.default_notional_value if not stated otherwise
+            start_date: The date of commencement of a swap contract
+            end_date: the date of terminatoion of a swap contract
+            market_state (Market): assumes Swap.Market_state if not stated otherwise
         '''
         self.notional = kwargs.get('notional', Swap.default_notional_value)
 
