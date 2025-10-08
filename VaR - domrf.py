@@ -1,14 +1,10 @@
 #idea is all these methods will be unified in the class in the other .py file
 
-#TODO 
-# 1. Validation wrapper - DONE 
-# 2. Timing wrapper - DONE 
-# 3. Module fopr converting everything into jnp - DONE 
-# 4. Non-normal VaR parametric models - REDUNDANT 
-# 5. Multiple asset VaR (with garch for every asset DCCgarch) - IN WORK 
-# 6. VaR for interest rate - IN WORK   
-# 7. Portfolio simulation - DONE 
-# 8. EVT 
+#TODO
+# 1. EVT - while do xi's differ 
+# 2. Multiple asset VaR (with garch for every asset DCCgarch) - IN WORK 
+# 3. VaR for interest rate - IN WORK   
+# 4. raise something for the case if xi is close to 0 in case of EVT 
 
 import jax
 from jax import random
@@ -32,7 +28,9 @@ number = Union[int, float]
 number_like = Union[List[number], number]
 array_like = Union[List[number], np.ndarray]
 distributions: TypeAlias = Literal["chauchy", "chi2", "expon", "exponpow", "gamma", "lognorm", "norm", "powerlaw", "rayleigh",
-                            "uniform", "t", "gumbel_r", "f"]    
+                            "uniform", "t", "gumbel_r", "f"]  
+
+ENABLE_TIMING = True  
 
 class Auxiliary:
     
@@ -233,6 +231,21 @@ class Auxiliary:
             
             # Call the original function with validated returns
             return returns
+    
+    @staticmethod
+    def simulated_data_banch(size): 
+        _ = []
+        for v in [1, 2, 3, 5, 7, 10, 15, 20, 35, 50]: 
+            r = stats.t.rvs(v, size=size)
+            _.append(r)
+
+        normi = stats.norm.rvs(size=size)
+        _.append(normi)
+        lap = stats.laplace.rvs(size=size)
+        _.append(lap)
+
+        return _ 
+
 
 @Auxiliary.timer
 def portfolio_return(returns, *args):
@@ -513,7 +526,7 @@ def neg_log_likelyhood(ppf: callable, **kwargs):
     return -log_l
 
 @Auxiliary.timer
-def MLE_EVT(returns, u_level = 0.99, mode_var = False): 
+def MLE_EVT(returns, u_level = 0.95, mode_var = False): 
     '''Peforms MLE for the EVT (IN WORK)
     
     !!! ADD TYPING 
@@ -551,7 +564,7 @@ def MLE_EVT(returns, u_level = 0.99, mode_var = False):
 
     return result 
 
-def EVT_var(returns, alpha=0.01, u_level = 0.99, return_details = False): 
+def EVT_var(returns, alpha=0.01, u_level = 0.95, return_details = False): 
     """
     EVT VaR assuming tail follow GPD (Generalized Paretto Distribution).
     """
@@ -561,18 +574,20 @@ def EVT_var(returns, alpha=0.01, u_level = 0.99, return_details = False):
     _log_beta = result.x[1]
     beta = jnp.exp(_log_beta)
 
-    nominator = xi/beta 
-    power = -xi 
+    nominator = beta/xi 
+    power = xi * (-1)
     n = returns.shape[0]
 
-    # print('IMPORTANT', n_u, n, beta, xi)
+    print('IMPORTANT', n_u, n, beta, xi, result.status)
 
-    VaR = u + nominator*(((n / n_u * alpha)**(power)) - 1)
-    print(u)
-    print(nominator*(((n / n_u * alpha)**(power)) - 1))
+    VaR = u + nominator*(((n / n_u * alpha)**(power)) - 1)  
+    # print(u)
+    # print(nominator*(((n / n_u * alpha)**(power)) - 1))
+    if nominator < 0: 
+        print('!!!!!!!!!!FLAG')
 
     if return_details is True: 
-        return VaR, result #allows for detailed results analysis
+        return VaR, result, u, [beta, xi] #allows for detailed results analysis
 
     return VaR 
 
@@ -618,22 +633,22 @@ if __name__ == "__main__":
     print(result.status)
     print('========================================================================')
     # returns_st = stats.t.rvs(3, size=500000)
-    returns_st = stats.t.rvs(3, size=50000)
+    returns_st = stats.t.rvs(5, size=500000)
     print(returns_st)
 
-    params = {
+    _params = {
         'y': returns_st, 
         'u': 0.02332493543601386,
         'beta': 1,
         'xi': 1
     }
-    params2 = {
+    _params2 = {
         'beta': 1,
         'xi': 1
     }
-    print(GPD_ppf(**params))
-    print(log_likelyhood(GPD_ppf, **params))
-    print(log_likelyhood(GPD_ppf, y = returns_st, u=0.02332493543601386, **params2))
+    print(GPD_ppf(**_params))
+    print(log_likelyhood(GPD_ppf, **_params))
+    print(log_likelyhood(GPD_ppf, y = returns_st, u=0.02332493543601386, **_params2))
 
     result = MLE_EVT(returns_st)
     print(result.success)
@@ -648,4 +663,37 @@ if __name__ == "__main__":
     print("Parametric VaR:", parametric_var_normal(returns_st, alpha))
     print("GARCH(1,1) with Normal distribution VaR:", garch_var(returns_st, alpha))
     print("GARCH(1,1) with Student distribution VaR:", garch_var(returns_st, alpha, dist='t'))
-    print('EVT VaR', EVT_var(returns_st, alpha))
+    print('EVT VaR', EVT_var(returns_st, alpha, u_level=0.95))
+
+    print('===============================================================================================================')
+    ENABLE_TIMING = False
+    alpha = 0.01
+    for r in Auxiliary.simulated_data_banch(size=5000): 
+        print("Historical VaR:", historical_var(r, alpha))
+        print("Parametric VaR:", parametric_var_normal(r, alpha))
+        print("GARCH(1,1) with Normal distribution VaR:", garch_var(r, alpha))
+        print("GARCH(1,1) with Student distribution VaR:", garch_var(r, alpha, dist='t'))
+        print('EVT VaR', EVT_var(r, alpha, u_level=0.95))
+        print('-------------------------------------------------------')
+    
+    print('===============================================================================================================')
+    # test = stats.norm.rvs(size=5000)
+    test = stats.t.rvs(1, size=5000)
+    std = jnp.std(test)
+    mean = jnp.mean(test)
+    print(mean, std)
+    print(historical_var(returns=test, alpha=0.01))
+    print(historical_var(returns=test, alpha=0.05))
+    VaR, result, u, _ = EVT_var(returns=test, alpha=0.01, u_level=0.95, return_details=True)
+    print(VaR)
+    print(u) 
+    print('-----------------------------------------')
+    test = stats.t.rvs(100, size=5000)
+    std = jnp.std(test)
+    mean = jnp.mean(test)
+    print(mean, std)
+    print(historical_var(returns=test, alpha=0.01))
+    print(historical_var(returns=test, alpha=0.05))
+    VaR, result, u, _ = EVT_var(returns=test, alpha=0.01, u_level=0.95, return_details=True)
+    print(VaR)
+    print(u) 
