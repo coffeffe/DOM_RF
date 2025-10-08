@@ -5,6 +5,7 @@
 # 2. Multiple asset VaR (with garch for every asset DCCgarch) - IN WORK 
 # 3. VaR for interest rate - IN WORK   
 # 4. raise something for the case if xi is close to 0 in case of EVT 
+# 5. VaR correlated returns (for the window functions)
 
 import jax
 from jax import random
@@ -590,6 +591,17 @@ def EVT_var(returns, alpha=0.01, u_level = 0.95, return_details = False):
         return VaR, result, u, [beta, xi] #allows for detailed results analysis
 
     return VaR 
+
+
+class Test: 
+    '''Class for .ipynb files and tests'''
+    def var_all_methods(returns, alpha, u=0.95): 
+        print("Historical VaR:", historical_var(returns, alpha))
+        print("Parametric VaR:", parametric_var_normal(returns, alpha))
+        print("GARCH(1,1) with Normal distribution VaR:", garch_var(returns, alpha))
+        print("GARCH(1,1) with Student distribution VaR:", garch_var(returns, alpha, dist='t'))
+        print('EVT VaR', EVT_var(returns, alpha, u_level=u))
+        return None 
 
 if __name__ == "__main__":
     key = random.PRNGKey(42)
