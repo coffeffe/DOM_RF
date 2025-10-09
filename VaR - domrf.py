@@ -1,11 +1,12 @@
 #idea is all these methods will be unified in the class in the other .py file
 
 #TODO
-# 1. EVT - while do xi's differ 
-# 2. Multiple asset VaR (with garch for every asset DCCgarch) - IN WORK 
-# 3. VaR for interest rate - IN WORK   
-# 4. raise something for the case if xi is close to 0 in case of EVT 
-# 5. VaR correlated returns (for the window functions)
+# 1. Multiple asset VaR (with garch for every asset DCCgarch) - IN WORK 
+# 2. VaR for interest rate - IN WORK   
+# 3. raise something for the case if xi is close to 0 in case of EVT 
+# 4. VaR correlated returns (for the window functions)
+# 5. ES (ensure it is optimal and uses the same resources as VaR)
+# 6. Write somewhere the fact that EVT performs best for student T with v in [1-5] df 
 
 import jax
 from jax import random
@@ -20,6 +21,7 @@ import time
 from dataclasses import dataclass
 from jax.scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from math import exp, pi, sqrt
 
 import jax.numpy as jnp
 
@@ -341,8 +343,6 @@ class Portfolio():
 
         self.kwargs = kwargs.copy()
 
-
-
 @Auxiliary.timer
 @Auxiliary.validate_portfolio_inputs
 @jax.jit
@@ -351,6 +351,17 @@ def historical_var(returns, alpha=0.01):
     Historical VaR at the given alpha level.
     """
     return -jnp.quantile(returns, alpha)
+
+@Auxiliary.timer
+@Auxiliary.validate_portfolio_inputs
+def historical_es(returns, alpha=0.01): 
+    '''Histrorical Expected Shorfall at the given alpha level'''
+    _ = -1 * returns 
+    sorted_returns = jnp.sort(_) #lossess are to the right
+    index = jnp.floor(alpha * sorted_returns.shape[0]).astype(jnp.int32)    
+    losses = sorted_returns[index:] 
+    es = jnp.mean(losses)
+    return es
 
 @Auxiliary.timer
 @Auxiliary.validate_portfolio_inputs
@@ -363,35 +374,16 @@ def parametric_var_normal(returns, alpha=0.01):
     var = stats.norm.ppf(alpha, loc=mean, scale=std)
     return -var
 
-# def monte_carlo_var(returns, alpha=0.01, n_sim=10000, key=random.PRNGKey(0)):
-#     """
-#     Monte Carlo VaR using bootstrapped returns. (In WORK)
-#     """
-#     idx = random.randint(key, (n_sim,), 0, len(returns))
-#     simulated = returns[idx]
-#     sorted_sim = jnp.sort(simulated)
-#     index = int(jnp.floor(alpha * n_sim))
-#     return -sorted_sim[index]
+def parametric_es_normal(returns, alpha=0.01):
+    '''Parametric ES assuming normal distribution
     
-# def make_bsm_market_simulator(
-#     ms: MarketState,
-#     params: BSParams,
-#     time_stop: float,
-#     n_steps: int = 200,
-# ):
-
-#     def simulate(n_paths: int, seed: int = 0xB0BA_C_3AB0DA):
-#         dt = (time_stop - ms.time) / n_steps
-#         random = np.random.default_rng(seed)
-#         norm = random.normal(size=(n_paths, n_steps))
-#         d_log_s = (
-#             (ms.interest_rate - params.volatility ** 2 / 2) * dt
-#             + params.volatility * norm * np.sqrt(dt)
-#         )
-#         d_log_s = np.insert(d_log_s, 0, np.zeros(n_paths), axis=1)
-#         return ms.stock_price * np.exp(np.cumsum(d_log_s, axis=-1))
-
-#     return simulate
+    For details consult Hull, J. (2012). Risk management and financial institutions  / John C. Hull. (3rd ed.). John Wiley. Equation (11.2)
+    '''
+    mean = jnp.mean(returns)
+    std = jnp.std(returns)
+    y = stats.norm.ppf(alpha)
+    es = mean + std*((exp(-(y**2)/2))/(sqrt(2*pi)*(alpha)))
+    return es
 
 @Auxiliary.timer
 @Auxiliary.validate_portfolio_inputs
@@ -470,6 +462,59 @@ def garch_var(
         quantile = stats.norm.ppf(alpha)  # fallback
     var = mu + sigma * quantile
     return -var
+
+@Auxiliary.timer
+@Auxiliary.validate_portfolio_inputs
+def garch_es(
+    returns,
+    alpha: float = 0.01,
+    p: int = 1,
+    q: int = 1,
+    mean: str = "Zero",
+    vol: str = "Garch",
+    dist: str = "normal",
+    rescale: bool = False,
+    hold_back: int = 0,
+    last_obs: Union[int, None] = None,
+    update_freq: int = 1,
+    starting_values: Union[None, List[float]] = None,
+    options: dict = None, 
+    disp: str = 'off'
+    ):
+    """
+    Estimates Expected Shortgall (ES) using a GARCH model.
+    This function fits a GARCH(p, q) model to the provided returns and computes the 
+    one-step ahead VaR at the specified significance level (alpha). Offspring of garch_var().
+    Note, it does not support non-normal distributions. 
+    """
+    am = arch_model(
+        returns,
+        mean=mean,
+        vol=vol,
+        p=p,
+        q=q,
+        dist=dist,
+        rescale=rescale,
+        hold_back=hold_back
+    )
+    res = am.fit(
+        last_obs=last_obs,
+        update_freq=update_freq,
+        starting_values=starting_values,
+        options=options,
+        disp=disp
+    )
+    # Forecast 1-step ahead volatility
+    forecast = res.forecast(horizon=1)
+    mu = res.params.get("mu", 0)
+    sigma = forecast.variance.values[-1, 0] ** 0.5
+    # Get the quantile for the specified distribution
+    if dist == "normal":
+        quantile = stats.norm.ppf(alpha)
+    else:
+        raise ValueError(f'The function does not support {dist} ditribution')
+    es = mu + sigma*((exp(-(quantile**2)/2))/(sqrt(2*pi)*(alpha)))
+    return es
 
 @Auxiliary.timer
 @Auxiliary.validate_portfolio_inputs
@@ -568,6 +613,8 @@ def MLE_EVT(returns, u_level = 0.95, mode_var = False):
 def EVT_var(returns, alpha=0.01, u_level = 0.95, return_details = False): 
     """
     EVT VaR assuming tail follow GPD (Generalized Paretto Distribution).
+
+    For details refer to Hull, J. (2012). Risk management and financial institutions  / John C. Hull. (3rd ed.). John Wiley. Equation (12.9)
     """
     result, u, n_u = MLE_EVT(returns, u_level=u_level, mode_var=True)
 
@@ -582,8 +629,6 @@ def EVT_var(returns, alpha=0.01, u_level = 0.95, return_details = False):
     print('IMPORTANT', n_u, n, beta, xi, result.status)
 
     VaR = u + nominator*(((n / n_u * alpha)**(power)) - 1)  
-    # print(u)
-    # print(nominator*(((n / n_u * alpha)**(power)) - 1))
     if nominator < 0: 
         print('!!!!!!!!!!FLAG')
 
@@ -591,6 +636,30 @@ def EVT_var(returns, alpha=0.01, u_level = 0.95, return_details = False):
         return VaR, result, u, [beta, xi] #allows for detailed results analysis
 
     return VaR 
+
+def EVT_es(returns, alpha=0.01, u_level = 0.95, return_details = False): 
+    """
+    EVT VaR assuming tail follow GPD (Generalized Paretto Distribution).
+
+    For details refer to Hull, J. (2012). Risk management and financial institutions  / John C. Hull. (3rd ed.). John Wiley. Equation (12.10)
+    """
+    result, u, n_u = MLE_EVT(returns, u_level=u_level, mode_var=True)
+
+    xi = result.x[0]
+    _log_beta = result.x[1]
+    beta = jnp.exp(_log_beta)
+
+    nominator = beta/xi 
+    power = xi * (-1)
+    n = returns.shape[0]
+
+    VaR = u + nominator*(((n / n_u * alpha)**(power)) - 1) 
+
+    nominator2 = VaR + beta + (xi * u) 
+    denominator = 1 - xi 
+    es = nominator2/denominator 
+
+    return es 
 
 
 class Test: 
@@ -709,3 +778,12 @@ if __name__ == "__main__":
     VaR, result, u, _ = EVT_var(returns=test, alpha=0.01, u_level=0.95, return_details=True)
     print(VaR)
     print(u) 
+    print('==========================================================================================')
+
+    std = 20 
+    returns_example1110 = stats.norm.rvs(scale=std, size=5000)
+
+    t4 = parametric_es_normal(returns_example1110)
+    print(t4)
+
+

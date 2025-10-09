@@ -1,0 +1,3 @@
+Update list for VaR - domrf.py 09/10/2025
+1. Added ES calculation 
+2. VaR - domrf.py is a collection of donor methods for future structures
