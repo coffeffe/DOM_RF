@@ -35,6 +35,9 @@ distributions: TypeAlias = Literal["chauchy", "chi2", "expon", "exponpow", "gamm
 
 ENABLE_TIMING = True  
 
+class Portfolio: 
+    pass
+
 class Auxiliary:
     
     #might be usefull later
@@ -58,6 +61,9 @@ class Auxiliary:
             ''' Decorator function for timing function calling. '''
             @wraps(func)
             def wrapper(*args, **kwargs):
+
+                if not ENABLE_TIMING:
+                    return func(*args, **kwargs)
                 start = time.perf_counter()
                 value = func(*args, **kwargs)
                 total = time.perf_counter() -start
@@ -386,7 +392,6 @@ def parametric_es_normal(returns, alpha=0.01):
     return es
 
 @Auxiliary.timer
-@Auxiliary.validate_portfolio_inputs
 def garch_var(
     returns,
     alpha: float = 0.01,
