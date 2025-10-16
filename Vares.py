@@ -14,6 +14,7 @@ from scipy.stats import *
 from scipy import stats 
 from typing import Union, List, Literal, TypeAlias
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from functools import wraps, partial
 from arch import arch_model
@@ -32,11 +33,11 @@ number_like = Union[List[number], number]
 array_like = Union[List[number], np.ndarray]
 distributions: TypeAlias = Literal["chauchy", "chi2", "expon", "exponpow", "gamma", "lognorm", "norm", "powerlaw", "rayleigh",
                             "uniform", "t", "gumbel_r", "f"]  
+FloatArray = npt.NDArray[np.float64]
+Floats = Union[float, FloatArray]
+Int = Union[int, np.int16, np.int32, np.int64, jnp.int64, jnp.int32, jnp.int16]
 
 ENABLE_TIMING = True  
-
-class Portfolio: 
-    pass
 
 class Auxiliary:
     
@@ -336,18 +337,84 @@ def portfolio_return_fast(returns: Union[jax.Array, list]):
         return _
 
 @dataclass
-class GBMParams: 
-    '''(IN WORK)'''
-    pass
+class GBMParams:
+    volatility: Floats 
+    mean: Floats 
 
-class Portfolio():
-    '''(IN WORK)'''
-    @Auxiliary.validate_portfolio_inputs
-    def __init__(self, portfolio, **kwargs): 
-        self.portfolio = portfolio 
-        self.number_of_assets = self.returns.shape[1]
+def make_gbm_simulator(
+        params: GBMParams,
+        T: int, 
+        granularity: int = 1000
+    ): 
+    '''Creates a Geometric Brownian Motion simulator with predetermined parameters. 
+    Returns a batch of simulated data.'''
+    def simulate(n_paths: int, seed = None):
+        if seed is not None:
+            rng = np.random.default_rng(seed=seed)
+        else:
+            rng = np.random.default_rng()
+
+        time_grid = T * granularity
+        dt = 1 / granularity
+        norm = rng.normal(size=(n_paths, time_grid))
+
+        #Simulate log returns paths using GBM.
+        d_log_S = (
+            (params.mean - ((params.volatility**2) / 2)) * dt 
+            + params.volatility * norm * np.sqrt(dt)
+        )
+        d_log_S = np.insert(d_log_S, 0, np.zeros(n_paths), axis=1)
+
+        cum_log_returns = np.cumsum(d_log_S, axis=-1)
+        cum_returns = np.exp(cum_log_returns) - 1 
+
+        return cum_returns
+    return simulate 
+
+def _terminal_returns(simulator: callable, n_paths: int, seed = None): 
+    '''Helper method for stripping and returning the last column of the return matrix.'''
+    cummulative_returns = simulator(n_paths, seed)
+    terminal_returns = cummulative_returns[:, -1] #in case of GBM terminal return will be distributed lognormally
+    return terminal_returns
+
+class ProtoPortfolio: 
+    def __init__(self, returns, **kwargs): 
+        self.returns = returns #(portfolio) returns
+        try:
+            self.number_of_assets = self.returns.shape[1] 
+        except IndexError: 
+            self.number_of_assets = 1
 
         self.kwargs = kwargs.copy()
+
+    def calibrate(self, horizon=1, **kwargs): 
+        '''Private method implies variance and mean of returns of assets' returns using GARCH(p, q)
+        
+        Now it is unable to handle returns across multiple(>1) assets. Also can not handle horizon > 1'''
+        am = arch_model(self.returns, vol='Garch', dist='normal', **kwargs)
+        result = am.fit(disp='off')
+        forecast = result.forecast(horizon=horizon)
+        mu = result.params.get("mu", 0)
+        sigma = forecast.variance.values[0]
+        parameters = GBMParams(volatility=sigma, mean=mu)
+
+        self.parameters = parameters #for testing 
+
+        return None
+    
+    def _simulate(self, T: int = 10, n_paths: int = 500, granularity: int = 1000):
+        '''Simualtes GBM n_paths times. Outputs simulated array of terminal returns.'''
+        simulator = make_gbm_simulator(self.parameters, T, granularity)
+        simulated_returns = _terminal_returns(simulator, n_paths)
+
+        return simulated_returns 
+    
+    def historical_var(self, alpha=0.01, T: int = 10, **kwargs): 
+        _ = self._simulate(T, **kwargs)
+        return -np.quantile(_, alpha)
+
+
+
 
 @Auxiliary.timer
 @Auxiliary.validate_portfolio_inputs
