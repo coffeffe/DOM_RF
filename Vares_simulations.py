@@ -182,7 +182,7 @@ def solve_simple_gbm(params: GBMParams,
     '''Alternative to make_gbm_generator. Uses analytical explicit solution for terminal returns output.'''
     if params.volatility.shape[0] != 1: 
         raise ValueError('This method is suited only for constant volatility processes')
-    W_T = stats.norm.rvs(scale=T, size=n_paths) #Brownian motion value at the terminal time
+    W_T = stats.norm.rvs(scale=np.sqrt(T), size=n_paths) #Brownian motion value at the terminal time
     return S_0 * np.exp((params.mean - (params.volatility**2)/2)*T + params.volatility * W_T) - 1
 
 @Auxiliary.timer
@@ -199,12 +199,105 @@ def solve_local_vol_gbm(
         print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
 
     W_t = stats.norm.rvs(scale=1, size=(n_paths, T))
-    d_log_S = np.zeros(shape=(5000, T))
+    d_log_S = np.zeros(shape=(n_paths, T))
     #infering daily price 
     for t in range(params.volatility.shape[0]): 
         d_log_S[:, t:t+1] = ((params.mean - ((params.volatility[t]**2) / 2)) 
                 + params.volatility[t] * W_t[:, t:t+1])
-    _ = params.volatility.shape[0] 
-    d_log_S[:, _:] = ((params.mean - ((params.volatility[-1]**2) / 2)) * (T - _)
-                + params.volatility[-1] * W_t[:, _:])
+    if T > params.volatility.shape[0]: 
+        _ = params.volatility.shape[0] 
+        d_log_S[:, _:] = ((params.mean - ((params.volatility[-1]**2) / 2)) * (T - _)
+                    + params.volatility[-1] * W_t[:, _:])
     return S_0 * np.exp(np.sum(d_log_S, axis=1)) - 1
+
+__DISTRIBUTIONS__ = Auxiliary.__DISTRIBUTIONS__
+
+class SimParams(GBMParams): 
+    def __init__(self, *args, parameters: GBMParams = None, **kwargs): 
+        '''Copies parameters of the already ready GBM parameters'''
+        if parameters is None: 
+            super().__init__(*args, **kwargs)
+        else: 
+            self.volatility = parameters.volatility
+            self.mean = parameters.mean
+        self.other_parameters = kwargs.copy()
+
+def make_random_path_simulator(
+        params: SimParams,
+        T: int, 
+        dist: str = 't',
+        granularity: int = 1000,
+        **kwargs
+    ): 
+    '''Simulates returns driven by the prespecified innovation (dist). Kwargs allow for adjusting parameters of particular distributions.
+    Returns a batch of simulated data. The simulated data is shifted by -1 term.'''
+    def simulate(n_paths: int, seed = None):
+        if seed is not None:
+            rng = np.random.default_rng(seed=seed)
+        else:
+            rng = np.random.default_rng()
+
+        time_grid = T * granularity
+        dt = 1 / granularity
+        stoch_comp = __DISTRIBUTIONS__[dist].rvs(**kwargs, size=(n_paths, time_grid))
+        # print(stoch_comp)
+        if np.inf in stoch_comp: 
+            raise MemoryError
+
+        #Simulate log returns paths using GBM.
+        d_log_S = (
+            params.mean * dt 
+            + params.volatility * stoch_comp * np.sqrt(dt)
+        )
+
+        cum_log_returns = np.cumsum(d_log_S, axis=-1)
+        # return cum_log_returns
+        cum_returns = np.exp(cum_log_returns) - 1
+
+        return cum_returns
+    return simulate 
+
+def make_random_path_simulator_local_vol(
+        params: SimParams,
+        T: int, 
+        dist: distributions = 't',
+        granularity: int = 1000,
+        **kwargs
+    ): 
+    '''Simulates returns driven by the prespecified innovation (dist). Kwargs allow for adjusting parameters of particular distributions.
+    Returns a batch of simulated data. The simulated data is shifted by -1 term.'''
+
+    if T < params.volatility.shape[0]: 
+        raise ValueError('Quantity of forecasted volatility can not exceed number of days to simulte')
+    
+    elif T > params.volatility.shape[0]:
+        print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
+
+    def simulate(n_paths: int, seed = None):
+        if seed is not None:
+            rng = np.random.default_rng(seed=seed)
+        else:
+            rng = np.random.default_rng()
+
+        time_grid = T * granularity
+        dt = 1 / granularity
+        stoch_comp = __DISTRIBUTIONS__[dist].rvs(**kwargs, size=(n_paths, time_grid))
+
+        #iterating through available volatility points 
+        d_log_S = np.zeros(shape=(n_paths, time_grid))
+        for t in range(params.volatility.shape[0]):
+            _t = t * granularity
+            d_log_S[:, _t:_t+granularity] = (
+                params.mean * dt + 
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
+            )
+        _T = params.volatility.shape[0] * granularity
+        d_log_S[:, _T:] = ((params.mean * dt) +
+                    + params.volatility[-1] * stoch_comp[:, _T:] * np.sqrt(dt))
+
+        cum_log_returns = np.cumsum(d_log_S, axis=-1)
+        # return cum_log_returns
+        cum_returns = np.exp(cum_log_returns) - 1
+
+        return cum_returns
+    return simulate 
