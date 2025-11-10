@@ -377,41 +377,44 @@ def _terminal_returns(simulator: callable, n_paths: int, seed = None):
     terminal_returns = cummulative_returns[:, -1] #in case of GBM terminal return will be distributed lognormally
     return terminal_returns
 
-class ProtoPortfolio: 
-    def __init__(self, returns, **kwargs): 
-        self.returns = returns #(portfolio) returns
-        try:
-            self.number_of_assets = self.returns.shape[1] 
-        except IndexError: 
-            self.number_of_assets = 1
 
-        self.kwargs = kwargs.copy()
+#incorrectly handles volatility - insert variance instead of standard deviation
 
-    def calibrate(self, horizon=1, **kwargs): 
-        '''Private method implies variance and mean of returns of assets' returns using GARCH(p, q)
+# class ProtoPortfolio: 
+#     def __init__(self, returns, **kwargs): 
+#         self.returns = returns #(portfolio) returns
+#         try:
+#             self.number_of_assets = self.returns.shape[1] 
+#         except IndexError: 
+#             self.number_of_assets = 1
+
+#         self.kwargs = kwargs.copy()
+
+#     def calibrate(self, horizon=1, **kwargs): 
+#         '''Private method implies variance and mean of returns of assets' returns using GARCH(p, q)
         
-        Now it is unable to handle returns across multiple(>1) assets. Also can not handle horizon > 1'''
-        am = arch_model(self.returns, vol='Garch', dist='normal', **kwargs)
-        result = am.fit(disp='off')
-        forecast = result.forecast(horizon=horizon)
-        mu = result.params.get("mu", 0)
-        sigma = forecast.variance.values[0]
-        parameters = GBMParams(volatility=sigma, mean=mu)
+#         Now it is unable to handle returns across multiple(>1) assets. Also can not handle horizon > 1'''
+#         am = arch_model(self.returns, vol='Garch', dist='normal', **kwargs)
+#         result = am.fit(disp='off')
+#         forecast = result.forecast(horizon=horizon)
+#         mu = result.params.get("mu", 0)
+#         sigma = forecast.variance.values[0]
+#         parameters = GBMParams(volatility=sigma, mean=mu)
 
-        self.parameters = parameters #for testing 
+#         self.parameters = parameters #for testing 
 
-        return None
+#         return None
     
-    def _simulate(self, T: int = 10, n_paths: int = 500, granularity: int = 1000):
-        '''Simualtes GBM n_paths times. Outputs simulated array of terminal returns.'''
-        simulator = make_gbm_simulator(self.parameters, T, granularity)
-        simulated_returns = _terminal_returns(simulator, n_paths)
+#     def _simulate(self, T: int = 10, n_paths: int = 500, granularity: int = 1000):
+#         '''Simualtes GBM n_paths times. Outputs simulated array of terminal returns.'''
+#         simulator = make_gbm_simulator(self.parameters, T, granularity)
+#         simulated_returns = _terminal_returns(simulator, n_paths)
 
-        return simulated_returns 
+#         return simulated_returns 
     
-    def historical_var(self, alpha=0.01, T: int = 10, **kwargs): 
-        _ = self._simulate(T, **kwargs)
-        return -np.quantile(_, alpha)
+#     def historical_var(self, alpha=0.01, T: int = 10, **kwargs): 
+#         _ = self._simulate(T, **kwargs)
+#         return -np.quantile(_, alpha)
 
 
 
