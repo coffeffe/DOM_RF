@@ -182,7 +182,7 @@ def solve_simple_gbm(params: GBMParams,
     '''Alternative to make_gbm_generator. Uses analytical explicit solution for terminal returns output.'''
     if params.volatility.shape[0] != 1: 
         raise ValueError('This method is suited only for constant volatility processes')
-    W_T = stats.norm.rvs(scale=np.sqrt(T), size=n_paths) #Brownian motion value at the terminal time
+    W_T = stats.norm.rvs(scale=T, size=n_paths) #Brownian motion value at the terminal time
     return S_0 * np.exp((params.mean - (params.volatility**2)/2)*T + params.volatility * W_T) - 1
 
 @Auxiliary.timer
@@ -191,7 +191,8 @@ def solve_local_vol_gbm(
         T: int,
         n_paths: int = 5000,
         S_0: float = 1): 
-    '''Same as solve_simple_gbm(), but allows for varying daily volatility of the underlying. A more flexible solution'''
+    '''Same as solve_simple_gbm(), but allows for varying daily volatility of the underlying. A more flexible solution. 
+    Works best with regular returns.'''
     
     if T < params.volatility.shape[0]: 
         raise ValueError('Quantity of forecasted volatility can not exceed number of days to simulte')
@@ -204,10 +205,9 @@ def solve_local_vol_gbm(
     for t in range(params.volatility.shape[0]): 
         d_log_S[:, t:t+1] = ((params.mean - ((params.volatility[t]**2) / 2)) 
                 + params.volatility[t] * W_t[:, t:t+1])
-    if T > params.volatility.shape[0]: 
-        _ = params.volatility.shape[0] 
-        d_log_S[:, _:] = ((params.mean - ((params.volatility[-1]**2) / 2)) * (T - _)
-                    + params.volatility[-1] * W_t[:, _:])
+    _ = params.volatility.shape[0] 
+    d_log_S[:, _:] = ((params.mean - ((params.volatility[-1]**2) / 2)) * (T - _)
+                + params.volatility[-1] * W_t[:, _:])
     return S_0 * np.exp(np.sum(d_log_S, axis=1)) - 1
 
 __DISTRIBUTIONS__ = Auxiliary.__DISTRIBUTIONS__
@@ -260,7 +260,7 @@ def make_random_path_simulator(
 def make_random_path_simulator_local_vol(
         params: SimParams,
         T: int, 
-        dist: distributions = 't',
+        dist: distributions = 'norm', #changed student t to normal distribution ass this method does not handle other distributions well :( 
         granularity: int = 1000,
         **kwargs
     ): 
@@ -289,7 +289,7 @@ def make_random_path_simulator_local_vol(
             _t = t * granularity
             d_log_S[:, _t:_t+granularity] = (
                 params.mean * dt + 
-                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(t)
             )
         _T = params.volatility.shape[0] * granularity
         d_log_S[:, _T:] = ((params.mean * dt) +
@@ -301,3 +301,121 @@ def make_random_path_simulator_local_vol(
 
         return cum_returns
     return simulate 
+
+def make_random_path_simulator_local_vol_student(
+    params: SimParams,
+    T: int, 
+    nu: float, 
+    dist: distributions = 't',
+    granularity: int = 1000,
+):
+    '''Simulates returns driven by the Student innovation. 
+    Returns a batch of simulated data. The simulated data is logged.  Works with the log returns best'''
+
+    if T < params.volatility.shape[0]: 
+        raise ValueError('Quantity of forecasted volatility can not exceed number of days to simulte')
+    
+    elif T > params.volatility.shape[0]:
+        print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
+
+    def simulate(n_paths: int, seed = None):
+        if seed is not None:
+            rng = np.random.default_rng(seed=seed)
+        else:
+            rng = np.random.default_rng()
+
+        time_grid = T * granularity
+        dt = 1 / granularity
+        Z = stats.t.rvs(df=nu, size=(n_paths, time_grid)) #the innovation random variabled
+        if nu > 2.0: 
+            stoch_comp = Z * np.sqrt(nu-2) / np.sqrt(nu) #scaled to have unit variance 
+        else: 
+            raise ValueError('Can not model the price process as the innovation variable has non-finite variance')
+
+        #iterating through available volatility points 
+        d_log_S = np.zeros(shape=(n_paths, time_grid))
+        for t in range(params.volatility.shape[0]):
+            _t = t * granularity
+            d_log_S[:, _t:_t+granularity] = (
+                params.mean * dt + 
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(t)
+            )
+        _T = params.volatility.shape[0] * granularity
+        d_log_S[:, _T:] = ((params.mean * dt) +
+                    + params.volatility[-1] * stoch_comp[:, _T:] * np.sqrt(dt))
+
+        cum_log_returns = np.cumsum(d_log_S, axis=-1)
+        return cum_log_returns
+ 
+    return simulate
+
+def make_random_path_simulator_local_vol_log(
+        params: SimParams,
+        T: int, 
+        dist: distributions = 'norm',
+        granularity: int = 1000,
+        **kwargs
+    ): 
+    '''Simulates returns driven by the BM innovation (dist). 
+    Returns a batch of simulated data. The simulated data is logged. Works with the log returns best.'''
+
+    if T < params.volatility.shape[0]: 
+        raise ValueError('Quantity of forecasted volatility can not exceed number of days to simulte')
+    
+    elif T > params.volatility.shape[0]:
+        print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
+
+    def simulate(n_paths: int, seed = None):
+        if seed is not None:
+            rng = np.random.default_rng(seed=seed)
+        else:
+            rng = np.random.default_rng()
+
+        time_grid = T * granularity
+        dt = 1 / granularity
+        stoch_comp = __DISTRIBUTIONS__[dist].rvs(**kwargs, size=(n_paths, time_grid))
+
+        #iterating through available volatility points 
+        d_log_S = np.zeros(shape=(n_paths, time_grid))
+        for t in range(params.volatility.shape[0]):
+            _t = t * granularity
+            d_log_S[:, _t:_t+granularity] = (
+                params.mean * dt + 
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
+            )
+        _T = params.volatility.shape[0] * granularity
+        d_log_S[:, _T:] = ((params.mean * dt) +
+                    params.volatility[-1] * stoch_comp[:, _T:] * np.sqrt(dt))
+
+        cum_log_returns = np.cumsum(d_log_S, axis=-1)
+        return cum_log_returns
+        # cum_returns = np.exp(cum_log_returns) - 1
+
+        # return cum_returns
+    return simulate  
+    
+@Auxiliary.timer
+def solve_local_vol_gbm_log(
+        params: GBMParams, 
+        T: int,
+        n_paths: int = 5000,
+        S_0: float = 1): 
+    '''Same as solve_local_vol_gbm(), but handles log returns'''
+    
+    if T < params.volatility.shape[0]: 
+        raise ValueError('Quantity of forecasted volatility can not exceed number of days to simulte')
+    elif T > params.volatility.shape[0]:
+        print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
+
+    W_t = stats.norm.rvs(scale=1, size=(n_paths, T))
+    d_log_S = np.zeros(shape=(n_paths, T))
+    #infering daily price 
+    for t in range(params.volatility.shape[0]): 
+        d_log_S[:, t:t+1] = (params.mean 
+                + params.volatility[t] * W_t[:, t:t+1])
+    _ = params.volatility.shape[0] 
+    d_log_S[:, _:] = (params.mean * (T - _)
+                + params.volatility[-1] * W_t[:, _:])
+    
+    cum_log_returns = np.sum(d_log_S, axis=-1)
+    return cum_log_returns
