@@ -1,4 +1,0 @@
-Update list for VaR - domrf.py 07/10/2025
-1. Added portfolio_return(). The function calculates total return of a portfolio given its' assets returns 
-2. class Auxiliary now includes validation method and timer method. 
-3. EVT function (something wrong with it)
