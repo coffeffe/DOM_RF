@@ -1,3 +1,5 @@
+#That file contains some useful methods fore working with GARCH models in the contxt of VaR modeling 
+
 from arch import arch_model
 import numpy as np 
 from Vares import historical_var, _terminal_returns

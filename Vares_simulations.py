@@ -399,7 +399,8 @@ def solve_local_vol_gbm_log(
         params: GBMParams, 
         T: int,
         n_paths: int = 5000,
-        S_0: float = 1): 
+        S_0: float = 1,
+        seed = None): 
     '''Same as solve_local_vol_gbm(), but handles log returns'''
     
     if T < params.volatility.shape[0]: 
@@ -407,7 +408,7 @@ def solve_local_vol_gbm_log(
     elif T > params.volatility.shape[0]:
         print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
 
-    W_t = stats.norm.rvs(scale=1, size=(n_paths, T))
+    W_t = stats.norm.rvs(scale=1, size=(n_paths, T), random_state=seed)
     d_log_S = np.zeros(shape=(n_paths, T))
     #infering daily price 
     for t in range(params.volatility.shape[0]): 
