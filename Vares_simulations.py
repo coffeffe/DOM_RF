@@ -292,7 +292,7 @@ def make_random_path_simulator_local_vol(
             _t = t * granularity
             d_log_S[:, _t:_t+granularity] = (
                 params.mean * dt + 
-                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(t)
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
             )
         _T = params.volatility.shape[0] * granularity
         d_log_S[:, _T:] = ((params.mean * dt) +
@@ -341,7 +341,7 @@ def make_random_path_simulator_local_vol_student(
             _t = t * granularity
             d_log_S[:, _t:_t+granularity] = (
                 params.mean * dt + 
-                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(t)
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
             )
         _T = params.volatility.shape[0] * granularity
         d_log_S[:, _T:] = ((params.mean * dt) +
@@ -518,7 +518,7 @@ def make_random_path_simulator_local_vol_mean_student(
             _t = t * granularity
             d_log_S[:, _t:_t+granularity] = (
                 params.mean[t] * dt + 
-                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(t)
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
             )
         _T = params.volatility.shape[0] * granularity
         d_log_S[:, _T:] = ((params.mean[-1] * dt) +
