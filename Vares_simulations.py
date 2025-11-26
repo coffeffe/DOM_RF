@@ -529,6 +529,52 @@ def make_random_path_simulator_local_vol_mean_student(
  
     return simulate
 
+def make_random_path_simulator_local_vol_mean_generalized_normal(
+    params: SimParams,
+    T: int, 
+    nu: float, 
+    granularity: int = 1000,
+):
+    '''Simulates returns driven by the GE innovation. Allows for dynamic mean. 
+    Returns a batch of simulated data. The simulated data is logged.  Works with the log returns best'''
+    if params.volatility.shape[0] != params.mean.shape[0]:
+        raise ValueError('params.volatility.shape[0] has to be equal to params.mean.shape[0]')
+
+    if T < params.volatility.shape[0]: 
+        raise ValueError('Quantity of forecasted volatility can not exceed number of days to simulte')
+    
+    elif T > params.volatility.shape[0]:
+        print('Number of simulated days exceed number of forecasted volality points. Simulation will assume constant long-term volatility.')
+
+    def simulate(n_paths: int, seed = None):
+        if seed is not None:
+            rng = np.random.default_rng(seed=seed)
+        else:
+            rng = np.random.default_rng()
+
+        time_grid = T * granularity
+        dt = 1 / granularity
+
+        _std = stats.gennorm(nu).std()
+        stoch_comp = stats.gennorm.rvs(beta=nu, size=(n_paths, time_grid), scale = (1 / _std)) #the innovation random variable
+
+        #iterating through available volatility points 
+        d_log_S = np.zeros(shape=(n_paths, time_grid))
+        for t in range(params.volatility.shape[0]):
+            _t = t * granularity
+            d_log_S[:, _t:_t+granularity] = (
+                params.mean[t] * dt + 
+                params.volatility[t] * stoch_comp[:, _t:_t+granularity] * np.sqrt(dt)
+            )
+        _T = params.volatility.shape[0] * granularity
+        d_log_S[:, _T:] = ((params.mean[-1] * dt) +
+                    + params.volatility[-1] * stoch_comp[:, _T:] * np.sqrt(dt))
+
+        cum_log_returns = np.cumsum(d_log_S, axis=-1)
+        return cum_log_returns
+ 
+    return simulate
+
 from arch.univariate import GARCH, EWMAVariance, EGARCH, RiskMetrics2006, FIGARCH, APARCH
 from arch.univariate import Normal, StudentsT
 from arch.univariate import ARX, HARX, ARCHInMean, LS, ConstantMean
