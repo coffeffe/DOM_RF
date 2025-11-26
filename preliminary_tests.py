@@ -57,7 +57,7 @@ def model_construction(mean_process: str, volatiltiy_process: str, dist_process:
         #parameter estimation
         results = model.fit(disp='off')
 
-        if forecasting_mode == 'dafault':
+        if forecasting_mode == 'default':
             h = int(T) 
         else: h=1           
 
@@ -137,11 +137,16 @@ def fit_GARCH_VaR(returns, garch_simulation: callable, lag=365, **kwargs):
 
     for t in range(avialable_lenth): 
         returns_sliced = returns[t:t+365]
-        VaRs.append(garch_simulation(returns_sliced))
+        VaRs.append(garch_simulation(returns_sliced, **kwargs))
 
     return VaRs
 
 import pickle
+
+def dict_to_filename(d: dict, suffix=".pkl") -> str:
+    items = [f"{k}={v}" for k, v in sorted(d.items())]
+    _ = "_".join(items)
+    return _
 
 def modeling(returns, distribution: str): 
     pickle_names = []
@@ -162,8 +167,9 @@ def modeling(returns, distribution: str):
                 _vars = fit_GARCH_VaR(returns, simulator)
 
                 #creating pickle file with transparent naming
-                pickle_name = f'{volatility}-{mean}-{distribution}-{parameters}'
-                with open(pickle_name, "wb") as f:
+                pickle_name = f'{volatility}-{mean}-{distribution}-{dict_to_filename(parameters)}'
+                pickle_file = pickle_name + '.pkl'
+                with open(pickle_file, "wb") as f:
                     pickle.dump(_vars, f)
 
                 pickle_names.append(pickle_name)
@@ -174,8 +180,9 @@ def modeling(returns, distribution: str):
                     _vars = fit_GARCH_VaR(returns, simulator)
 
                     #creating pickle file with transparent naming
-                    pickle_name = f'{volatility}-{mean}({mean_parameters})-{distribution}-{parameters}'
-                    with open(pickle_name, "wb") as f:
+                    pickle_name = f'{volatility}-{mean}({dict_to_filename(mean_parameters)})-{distribution}-{dict_to_filename(parameters)}'
+                    pickle_file = pickle_name + '.pkl'
+                    with open(pickle_file, "wb") as f:
                         pickle.dump(_vars, f)
 
                     pickle_names.append(pickle_name)
