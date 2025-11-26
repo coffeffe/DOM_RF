@@ -529,13 +529,13 @@ def make_random_path_simulator_local_vol_mean_student(
  
     return simulate
 
-from arch.univariate import GARCH, EWMAVariance, EGARCH, RiskMetrics2006
+from arch.univariate import GARCH, EWMAVariance, EGARCH, RiskMetrics2006, FIGARCH, APARCH
 from arch.univariate import Normal, StudentsT
 from arch.univariate import ARX, HARX, ARCHInMean, LS, ConstantMean
 
 from Vares import historical_var
 
-__VOLATILITY__ = {'GARCH': GARCH, 'TARCH': GARCH, 'EWMAVariance': EWMAVariance, 'EGARCH': EGARCH}
+__VOLATILITY__ = {'GARCH': GARCH, 'TARCH': GARCH, 'EWMAVariance': EWMAVariance, 'EGARCH': EGARCH, 'FIGARCH': FIGARCH, 'APARCH': APARCH}
 __DISTRIBUTIONS__ = {'norm': Normal, 't': StudentsT}
 __MEAN__ = {'arx': ARX, 'harx': HARX, 'LS': LS, 'a-i-m': ARCHInMean, 'CM': ConstantMean}
 
