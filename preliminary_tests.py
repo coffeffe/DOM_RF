@@ -41,10 +41,7 @@ def model_construction(mean_process: str, volatiltiy_process: str, dist_process:
         '''Simulates returns. Allows for dynamic mean. The simulated data MUST logged.'''
 
         #model specification
-        if volatiltiy_process == 'HARCH': #harch inputs are colliding with the mean model inputs :(
-            vol = __VOLATILITY__[volatiltiy_process](lags)
-        else: 
-            vol = __VOLATILITY__[volatiltiy_process](**kwargs)
+        vol = __VOLATILITY__[volatiltiy_process](**kwargs)
 
         if mean_process == 'CM' or mean_process == 'LS':
             model = __MEAN__[mean_process](returns)
@@ -112,7 +109,6 @@ figarch_parameters = [dict(zip(['p', 'power', 'q'], triple)) for triple in figar
 
 __MODELPARAMETERS__ = {'GARCH-CM': garch_parameters,
                        'EGARCH-CM': [{'p': 1, 'q': 1}], 
-                       'HARCH-CM': [{'lags': [1, 5, 22]}], 
                        'RM2006-CM': [{'tau0': [1560], 'tau1': [4], 'kmax': [14], 'rho': '1.4142135623730951'}],
                        'EWMAVariance-CM': [{'lam': None}], 
                        'APARCH-CM': aparch_parameters,
@@ -156,9 +152,6 @@ def modeling(returns, distribution: str):
     
     for model_type in __MODELS__: #iterate over all model types 
         volatility, mean = model_type.split('-')
-
-        if volatility == 'HARCH' and mean in ['AR', 'HAR']: #colision of the input names
-            continue #skip that pair 
         
         for parameters in __MODELPARAMETERS__[model_type]: 
             
